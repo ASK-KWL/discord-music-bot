@@ -53,42 +53,116 @@ async function downloadAndConvertAudio(videoUrl) {
 }
 
 async function createPlayer(url) {
-  console.log('Creating audio player for YouTube song');
-  const player = createAudioPlayer();
-  
-  try {
-    // Download the audio file first
-    const audioFile = await downloadAndConvertAudio(url);
-    
-    // Create a read stream from the downloaded file
-    const fileStream = fs.createReadStream(audioFile);
-    
-    // Create audio resource
-    const resource = createAudioResource(fileStream, {
-      inputType: StreamType.Arbitrary,
-      inlineVolume: true
-    });
-    
-    // Set volume to a reasonable level
-    if (resource.volume) {
-      resource.volume.setVolume(0.8);
+  console.log('Creating audio player from downloaded file');
+  const player = createAudioPlayer({
+    behaviors: {
+      noSubscriber: 'pause',
+      maxMissedFrames: Math.round(5000 / 20), // Allow 5 seconds of missed frames
     }
-    
-    // Clean up the audio file when playback finishes
-    player.on('stateChange', (oldState, newState) => {
-      if (newState.status === 'idle') {
-        console.log(`Cleaning up temp file: ${audioFile}`);
-        fs.unlink(audioFile, (err) => {
-          if (err) console.error('Error removing temp file:', err);
-        });
-      }
-    });
-    
-    return { player, resource, audioFile };
-  } catch (error) {
-    console.error('Error creating player:', error);
-    throw error;
+  });
+
+  // Download the file first for reliability
+  const audioFile = await downloadAndConvertAudio(url);
+
+  // Verify file exists and is readable
+  if (!fs.existsSync(audioFile)) {
+    throw new Error('Downloaded audio file not found');
   }
+
+  // Create resource from the downloaded file
+  const resource = createAudioResource(audioFile, {
+    inputType: StreamType.Arbitrary,
+    inlineVolume: true,
+    metadata: {
+      title: 'Audio Track',
+      url: url,
+      audioFile: audioFile // Store file path in metadata
+    }
+  });
+
+  if (resource.volume) {
+    resource.volume.setVolume(0.8);
+  }
+
+  // Better cleanup handling with proper waiting
+  let cleanupScheduled = false;
+  let playerReleased = false;
+  let resourceReleased = false;
+  
+  const tryCleanup = () => {
+    if (cleanupScheduled) return;
+    
+    // Only cleanup when both player and resource are released
+    if (playerReleased && resourceReleased) {
+      cleanupScheduled = true;
+      console.log('All resources released, scheduling cleanup for:', path.basename(audioFile));
+      
+      // Wait a bit longer to ensure file handles are fully released
+      setTimeout(() => {
+        attemptFileCleanup(audioFile);
+      }, 3000); // Increased wait time
+    }
+  };
+
+  const attemptFileCleanup = (filePath, retryCount = 0) => {
+    const maxRetries = 5;
+    const retryDelay = 2000 * (retryCount + 1); // Exponential backoff
+    
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log('✅ Successfully cleaned up file:', path.basename(filePath));
+      }
+    } catch (error) {
+      if (error.code === 'EBUSY' && retryCount < maxRetries) {
+        console.log(`⏳ File still busy, retry ${retryCount + 1}/${maxRetries} in ${retryDelay}ms...`);
+        setTimeout(() => {
+          attemptFileCleanup(filePath, retryCount + 1);
+        }, retryDelay);
+      } else {
+        console.error(`❌ Failed to cleanup file after ${retryCount + 1} attempts:`, error.message);
+      }
+    }
+  };
+
+  // Listen to player state changes
+  player.on('stateChange', (oldState, newState) => {
+    console.log(`Player state: ${oldState.status} -> ${newState.status}`);
+    
+    if (newState.status === 'Idle') {
+      console.log('🎵 Player became idle');
+      playerReleased = true;
+      tryCleanup();
+    }
+  });
+
+  // Listen to resource events
+  resource.playStream.on('end', () => {
+    console.log('🎵 Audio stream ended');
+    resourceReleased = true;
+    tryCleanup();
+  });
+
+  resource.playStream.on('error', (error) => {
+    console.error('❌ Audio resource error:', error);
+    resourceReleased = true;
+    tryCleanup();
+  });
+
+  resource.playStream.on('close', () => {
+    console.log('🎵 Audio stream closed');
+    resourceReleased = true;
+    tryCleanup();
+  });
+
+  // Cleanup on player destruction
+  player.on('error', (error) => {
+    console.error('❌ Player error:', error);
+    playerReleased = true;
+    tryCleanup();
+  });
+
+  return { player, resource, audioFile };
 }
 
 // Function to get song info
@@ -120,7 +194,7 @@ async function getSongInfo(url) {
   }
 }
 
-// NEW: Function to get playlist info and videos
+// Function to get playlist info and videos
 async function getPlaylistInfo(playlistUrl) {
   try {
     console.log(`Getting playlist info for: ${playlistUrl}`);
@@ -161,7 +235,7 @@ async function getPlaylistInfo(playlistUrl) {
   }
 }
 
-// NEW: Function to check if URL is a playlist
+// Function to check if URL is a playlist
 function isPlaylist(url) {
   return url.includes('playlist?list=') || url.includes('&list=');
 }

@@ -2,37 +2,61 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Temporary directory for downloads
+const TEMP_DIR = path.join(os.tmpdir(), 'discord-music-bot');
+
 module.exports = {
   name: 'cleanup',
-  async execute(message) {
-    const tempDir = path.join(os.tmpdir(), 'discord-music-bot');
+  execute(message) {
+    cleanupTempFiles();
+    message.channel.send('🧹 Manual cleanup initiated!');
+  },
+};
+
+function cleanupTempFiles() {
+  if (!fs.existsSync(TEMP_DIR)) {
+    console.log('No temp directory found');
+    return;
+  }
+  
+  try {
+    const files = fs.readdirSync(TEMP_DIR);
+    console.log(`🧹 Starting manual cleanup of ${files.length} files...`);
     
-    message.channel.send('🧹 Cleaning up temporary files...');
-    
-    try {
-      if (fs.existsSync(tempDir)) {
-        const files = fs.readdirSync(tempDir);
-        
-        if (files.length === 0) {
-          message.channel.send('✅ No files to clean up.');
-          return;
-        }
-        
-        message.channel.send(`Found ${files.length} temporary files.`);
-        
-        let deleted = 0;
-        for (const file of files) {
-          fs.unlinkSync(path.join(tempDir, file));
-          deleted++;
-        }
-        
-        message.channel.send(`✅ Cleaned up ${deleted} temporary files.`);
+    files.forEach(file => {
+      const filePath = path.join(TEMP_DIR, file);
+      const stats = fs.statSync(filePath);
+      const now = Date.now();
+      const fileAge = now - stats.mtime.getTime();
+      
+      // Delete files older than 1 minute
+      if (fileAge > 60 * 1000) {
+        attemptFileCleanup(filePath, file);
       } else {
-        message.channel.send('✅ No temporary directory found.');
+        console.log(`⏳ Skipping recent file: ${file} (${Math.round(fileAge/1000)}s old)`);
       }
-    } catch (error) {
-      console.error('Cleanup error:', error);
-      message.reply(`❌ Error during cleanup: ${error.message}`);
+    });
+  } catch (error) {
+    console.error('Error during manual cleanup:', error);
+  }
+}
+
+function attemptFileCleanup(filePath, fileName, retryCount = 0) {
+  const maxRetries = 3;
+  
+  try {
+    fs.unlinkSync(filePath);
+    console.log(`✅ Manually cleaned up: ${fileName}`);
+  } catch (error) {
+    if (error.code === 'EBUSY' && retryCount < maxRetries) {
+      console.log(`⏳ File ${fileName} busy, retrying in 3 seconds...`);
+      setTimeout(() => {
+        attemptFileCleanup(filePath, fileName, retryCount + 1);
+      }, 3000);
+    } else if (error.code === 'ENOENT') {
+      console.log(`✅ File ${fileName} already deleted`);
+    } else {
+      console.error(`❌ Manual cleanup failed for ${fileName}:`, error.message);
     }
   }
-};
+}

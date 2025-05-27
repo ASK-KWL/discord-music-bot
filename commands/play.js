@@ -132,7 +132,9 @@ module.exports = {
             title: songTitle, 
             url: videoUrl,
             requestedBy: message.author.username
-          }]
+          }],
+          loop: false, // Add this line
+          textChannel: message.channel // Add this for easier messaging
         };
         
         queue.set(message.guild.id, serverQueue);
@@ -144,15 +146,35 @@ module.exports = {
             
             const currentQueue = queue.get(message.guild.id);
             if (currentQueue) {
-              currentQueue.songs.shift();
+              // Handle song loop FIRST
+              if (currentQueue.loop === 'song') {
+                console.log('🔂 Looping current song');
+                message.channel.send(`🔂 Looping: **${currentQueue.songs[0].title}**`);
+                // Don't shift, just replay
+                playNextSong(message, currentQueue);
+                return;
+              }
+
+              // Handle queue progression
+              if (currentQueue.loop === 'queue') {
+                console.log('🔁 Queue loop - moving song to end');
+                const currentSong = currentQueue.songs.shift();
+                currentQueue.songs.push(currentSong);
+              } else {
+                // Normal mode - remove current song
+                currentQueue.songs.shift();
+              }
               
               if (currentQueue.songs.length > 0) {
                 message.channel.send(`🎵 Playing next: **${currentQueue.songs[0].title}**`);
                 playNextSong(message, currentQueue);
               } else {
-                message.channel.send('✅ Queue finished. Leaving voice channel.');
-                currentQueue.connection.destroy();
-                queue.delete(message.guild.id);
+                // Only exit if NOT in queue loop mode
+                if (currentQueue.loop !== 'queue') {
+                  message.channel.send('✅ Queue finished. Leaving voice channel.');
+                  currentQueue.connection.destroy();
+                  queue.delete(message.guild.id);
+                }
               }
             }
           }
@@ -178,7 +200,7 @@ module.exports = {
   },
 };
 
-// Helper function to play next song (same as before)
+// Helper function to play next song
 async function playNextSong(message, serverQueue) {
   try {
     const { createPlayer } = require('../music/player');
@@ -196,15 +218,37 @@ async function playNextSong(message, serverQueue) {
         
         const currentQueue = queue.get(message.guild.id);
         if (currentQueue) {
-          currentQueue.songs.shift();
+          // Handle looping FIRST
+          if (currentQueue.loop === 'song') {
+            console.log('🔂 Looping current song');
+            message.channel.send(`🔂 Looping: **${currentQueue.songs[0].title}**`);
+            // Don't shift the queue, just replay the same song
+            playNextSong(message, currentQueue);
+            return;
+          }
+
+          // Handle queue progression
+          if (currentQueue.loop === 'queue') {
+            console.log('🔁 Queue loop - moving song to end');
+            const currentSong = currentQueue.songs.shift();
+            currentQueue.songs.push(currentSong);
+            message.channel.send(`🔁 Queue loop: **${currentQueue.songs[0].title}**`);
+          } else {
+            // Normal mode - remove current song
+            currentQueue.songs.shift();
+          }
           
+          // Check if there are more songs
           if (currentQueue.songs.length > 0) {
             message.channel.send(`🎵 Playing next: **${currentQueue.songs[0].title}**`);
             playNextSong(message, currentQueue);
           } else {
-            message.channel.send('✅ Queue finished. Leaving voice channel.');
-            currentQueue.connection.destroy();
-            queue.delete(message.guild.id);
+            // Only exit if NOT in queue loop mode
+            if (currentQueue.loop !== 'queue') {
+              message.channel.send('✅ Queue finished. Leaving voice channel.');
+              currentQueue.connection.destroy();
+              queue.delete(message.guild.id);
+            }
           }
         }
       }
@@ -214,7 +258,11 @@ async function playNextSong(message, serverQueue) {
     console.error('Error playing next song:', error);
     message.channel.send(`❌ Error playing next song: ${error.message}`);
     
-    serverQueue.songs.shift();
+    // Only shift if not in song loop mode
+    if (!serverQueue.loop || serverQueue.loop !== 'song') {
+      serverQueue.songs.shift();
+    }
+    
     if (serverQueue.songs.length > 0) {
       playNextSong(message, serverQueue);
     } else {
