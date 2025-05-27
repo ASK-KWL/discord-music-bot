@@ -27,21 +27,35 @@ function createAudioConnection(message) {
 async function downloadAndConvertAudio(videoUrl) {
   console.log(`Downloading and converting audio from: ${videoUrl}`);
   
-  // Generate unique filename
   const timestamp = Date.now();
   const tempFile = path.join(TEMP_DIR, `audio-${timestamp}.mp3`);
   
   try {
-    // Download audio using youtube-dl-exec
     await ytdl(videoUrl, {
       extractAudio: true,
       audioFormat: 'mp3',
-      audioQuality: 0, // Best quality
+      audioQuality: 0,
       output: tempFile,
       noCheckCertificates: true,
       noWarnings: true,
       preferFreeFormats: true,
-      addHeader: ['referer:youtube.com', 'user-agent:Mozilla/5.0'],
+      // Remove the problematic --extractor option
+      // Add proper headers
+      addHeader: [
+        'referer:youtube.com',
+        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      ],
+      // Remove extractor line - it's not needed and causing the error
+      noCallHome: true,
+      noCheckCertificate: true,
+      youtubeSkipDashManifest: true,
+      // Add retry options
+      retries: 3,
+      fragmentRetries: 3,
+      // Remove the problematic options that cause ambiguity
+      // forceIpv4: true,  // Remove this if it causes issues
+      // sleepInterval: 1,  // Remove this if it causes issues
+      // maxSleepInterval: 5  // Remove this if it causes issues
     });
     
     console.log(`Downloaded audio to: ${tempFile}`);
@@ -175,6 +189,13 @@ async function getSongInfo(url) {
       noCheckCertificate: true,
       preferFreeFormats: true,
       youtubeSkipDashManifest: true,
+      // Simplified headers - remove problematic options
+      addHeader: [
+        'referer:youtube.com',
+        'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      ],
+      // Add basic retry
+      retries: 2
     });
     
     return {
@@ -185,8 +206,9 @@ async function getSongInfo(url) {
     };
   } catch (error) {
     console.error('Error getting song info:', error);
+    // Return basic info instead of failing completely
     return {
-      title: 'Unknown Title',
+      title: 'Audio Track',
       duration: 0,
       uploader: 'Unknown',
       thumbnail: null

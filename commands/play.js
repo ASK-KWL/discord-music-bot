@@ -195,7 +195,14 @@ module.exports = {
       
     } catch (error) {
       console.error('Play error:', error);
-      message.reply(`❌ Error playing song: ${error.message}`);
+      
+      if (error.message.includes('Sign in to confirm')) {
+        message.reply('❌ YouTube is blocking requests. Try using a direct YouTube link or search for the song name instead of a URL.');
+      } else if (error.message.includes('Video unavailable')) {
+        message.reply('❌ This video is not available. Try a different song.');
+      } else {
+        message.reply(`❌ Error playing song: ${error.message}`);
+      }
     }
   },
 };
