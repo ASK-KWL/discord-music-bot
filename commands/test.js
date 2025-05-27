@@ -1,59 +1,60 @@
-const { createReadStream } = require('fs');
-const { join } = require('path');
-const { createAudioResource, StreamType } = require('@discordjs/voice');
-const queue = require('../music/queue');
-const { createAudioConnection } = require('../music/player');
+const { createAudioConnection, createPlayer, getSongInfo } = require('../music/player');
+const { AudioPlayerStatus } = require('@discordjs/voice');
 
 module.exports = {
   name: 'test',
-  async execute(message) {
+  async execute(message, args) {
     try {
-      message.channel.send('🔊 Testing audio playback...');
-      
-      // Get or create queue
-      let serverQueue = queue.get(message.guild.id);
-      if (!serverQueue) {
-        const connection = createAudioConnection(message);
-        
-        // Create an audio player using @discordjs/voice directly
-        const { createAudioPlayer, NoSubscriberBehavior } = require('@discordjs/voice');
-        const player = createAudioPlayer({
-          behaviors: {
-            noSubscriber: NoSubscriberBehavior.Pause,
-          },
-        });
-        
-        serverQueue = {
-          connection,
-          player,
-          songs: [{ title: 'Audio Test', url: 'test' }],
-        };
-        
-        queue.set(message.guild.id, serverQueue);
+      const voiceChannel = message.member.voice.channel;
+      if (!voiceChannel) {
+        return message.channel.send('❌ Join a voice channel first!');
       }
-      
-      // Use a test audio provided by YouTube
-      const play = require('play-dl');
-      const stream = await play.stream('https://www.youtube.com/watch?v=dQw4w9WgXcQ'); // Never Gonna Give You Up - should work
-      
-      // Create an audio resource from the stream
-      const resource = createAudioResource(stream.stream, {
-        inputType: stream.type,
-        inlineVolume: true,
+
+      // Test with Rick Roll (known working video)
+      const testUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+
+      message.channel.send(`🧪 Testing with stable ytdl-core: ${testUrl}`);
+
+      // Step 1: Get song info
+      message.channel.send('📋 Getting song info...');
+      const songInfo = await getSongInfo(testUrl);
+      message.channel.send(`🎵 Found: **${songInfo.title}**`);
+
+      // Step 2: Create connection
+      message.channel.send('🔗 Creating voice connection...');
+      const connection = createAudioConnection(message);
+
+      // Step 3: Create player
+      message.channel.send('🎵 Creating stable YouTube player...');
+      const { player, resource } = await createPlayer(testUrl);
+
+      // Step 4: Set up event listeners
+      player.on('stateChange', (oldState, newState) => {
+        console.log(`Stable Player: ${oldState.status} -> ${newState.status}`);
+        
+        if (newState.status === AudioPlayerStatus.Playing) {
+          message.channel.send('🔊 **STABLE YOUTUBE AUDIO IS PLAYING!**');
+        }
+        
+        if (newState.status === AudioPlayerStatus.Idle && oldState.status === AudioPlayerStatus.Playing) {
+          message.channel.send('✅ Stable YouTube audio finished');
+          connection.destroy();
+        }
       });
-      
-      if (resource.volume) {
-        resource.volume.setVolume(1.0);
-      }
-      
-      // Play the audio
-      serverQueue.connection.subscribe(serverQueue.player);
-      serverQueue.player.play(resource);
-      
-      message.channel.send('▶️ Playing test audio... You should hear something now.');
+
+      player.on('error', error => {
+        console.error('Stable Player error:', error);
+        message.channel.send(`❌ Stable player error: ${error.message}`);
+      });
+
+      // Step 5: Subscribe and play
+      message.channel.send('▶️ Starting stable YouTube playback...');
+      connection.subscribe(player);
+      player.play(resource);
+
     } catch (error) {
-      console.error('Test command error:', error);
-      message.reply(`❌ Test failed: ${error.message}`);
+      console.error('Stable YouTube test error:', error);
+      message.channel.send(`❌ Stable test failed: ${error.message}`);
     }
   },
 };

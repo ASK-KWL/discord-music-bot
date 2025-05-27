@@ -11,12 +11,12 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
     "@discordjs/voice": "^0.17.0",
-    "youtube-dl-exec": "^2.4.13",
+    "@distube/ytdl-core": "^4.13.5",
+    "discord.js": "^14.14.1",
     "dotenv": "^16.3.1",
-    "yt-search": "^2.10.4",
     "opusscript": "^0.0.8",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "yt-search": "^2.10.4"
   }
 }

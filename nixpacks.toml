@@ -1,6 +1,6 @@
 # filepath: d:\Code\discord-music-bot\nixpacks.toml
 [phases.setup]
-nixPkgs = ["nodejs_20", "python3", "python3Packages.pip", "ffmpeg", "yt-dlp"]
+nixPkgs = ["nodejs_20", "ffmpeg"]
 
 [phases.install] 
 cmds = ["npm ci"]
