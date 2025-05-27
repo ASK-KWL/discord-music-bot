@@ -13,7 +13,7 @@ module.exports = {
     const serverQueue = queue.get(message.guild.id);
 
     const video = ytdl.validateURL(query)
-      ? { url: query }
+      ? { url: query, title: "Requested Video" }  // You can fetch title later or improve this
       : (await yts(query)).videos[0];
 
     if (!video) return message.reply('❌ No results found.');
@@ -31,15 +31,21 @@ module.exports = {
       connection.subscribe(player);
       player.play(resource);
 
-      player.on(AudioPlayerStatus.Idle, () => {
-        songs.shift();
-        if (songs.length > 0) {
-          const next = createPlayer(createStream(songs[0].url));
-          connection.subscribe(next.player);
-          next.player.play(next.resource);
-        } else {
-          queue.delete(message.guild.id);
-          connection.destroy();
+      // Listen for state changes, handle queue progression
+      player.on('stateChange', (oldState, newState) => {
+        if (oldState.status === AudioPlayerStatus.Playing && newState.status === AudioPlayerStatus.Idle) {
+          songs.shift();
+          if (songs.length > 0) {
+            const next = createPlayer(createStream(songs[0].url));
+            connection.subscribe(next.player);
+            next.player.play(next.resource);
+
+            // Replace player with new one in queue data
+            queue.set(message.guild.id, { connection, songs, player: next.player });
+          } else {
+            queue.delete(message.guild.id);
+            connection.destroy();
+          }
         }
       });
 
