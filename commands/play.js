@@ -1,86 +1,104 @@
 const { joinVoiceChannel } = require('@discordjs/voice');
 const { getSongInfo } = require('../music/player');
-const ytSearch = require('yt-search');
+const { EmbedBuilder } = require('discord.js');
 const musicQueue = require('../music/queue');
 
 module.exports = {
   name: 'play',
   async execute(message, args) {
     try {
+      if (!args.length) {
+        return message.channel.send('❌ Please provide a YouTube URL or search query!');
+      }
+
       const voiceChannel = message.member.voice.channel;
       if (!voiceChannel) {
-        return message.channel.send('❌ You need to be in a voice channel to play music!');
+        return message.channel.send('❌ Join a voice channel first!');
       }
 
-      if (!args.length) {
-        return message.channel.send('❌ Please provide a song name or YouTube URL!');
-      }
-
-      const query = args.join(' ');
-      message.channel.send(`🔍 Searching for: **${query}**`);
-
-      let videoUrl;
-      let songTitle;
-      let duration = 0;
-
-      // Check if it's already a YouTube URL
-      if (query.includes('youtube.com') || query.includes('youtu.be')) {
-        videoUrl = query;
-        try {
-          const info = await getSongInfo(videoUrl);
-          songTitle = info.title;
-          duration = info.duration;
-        } catch {
-          songTitle = 'YouTube Video';
-        }
-      } else {
-        // Search for the song
-        const searchResults = await ytSearch(query);
-        if (!searchResults.videos.length) {
-          return message.channel.send('❌ No results found!');
-        }
+      const statusMsg = await message.channel.send('🔍 **Processing your request...**');
+      
+      let url = args.join(' ');
+      
+      // Check if it's a search query or URL
+      if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+        await statusMsg.edit('🔍 **Searching YouTube...**');
         
-        const video = searchResults.videos[0];
-        videoUrl = video.url;
-        songTitle = video.title;
-        duration = video.duration.seconds;
+        try {
+          const ytSearch = require('yt-search');
+          const searchResults = await ytSearch(url);
+          
+          if (!searchResults.videos.length) {
+            return statusMsg.edit('❌ No results found for your search!');
+          }
+          
+          const video = searchResults.videos[0];
+          url = video.url;
+          
+          await statusMsg.edit(`🎵 **Found:** ${video.title}`);
+        } catch (searchError) {
+          console.error('Search error:', searchError);
+          return statusMsg.edit('❌ Failed to search YouTube. Try using a direct URL.');
+        }
       }
+
+      // Get song info
+      await statusMsg.edit('📊 **Getting video information...**');
+      const songInfo = await getSongInfo(url);
+
+      // Add to queue
+      const queueData = musicQueue.getQueueList(message.guild.id);
 
       const song = {
-        title: songTitle,
-        url: videoUrl,
-        duration: duration,
+        title: songInfo.title,
+        url: url,
+        duration: songInfo.duration,
+        uploader: songInfo.uploader,
+        thumbnail: songInfo.thumbnail,
         requestedBy: message.author.tag
       };
 
-      // Add to queue
-      const queuePosition = await musicQueue.addSong(message.guild.id, song);
-      const queue = musicQueue.getQueueList(message.guild.id);
-
-      if (queue.isPlaying) {
-        message.channel.send(`✅ **${songTitle}** added to queue! Position: **${queuePosition}**`);
+      if (!queueData.current) {
+        // Nothing playing, start immediately
+        await statusMsg.edit('🎵 **Creating yt-dlp audio player...**');
+        
+        try {
+          const { createAudioConnection, createYouTubePlayerWithProcessing } = require('../music/player');
+          const connection = createAudioConnection(message);
+          
+          await statusMsg.edit('🔄 **Processing YouTube audio with yt-dlp...**');
+          const { player, resource } = await createYouTubePlayerWithProcessing(url);
+          
+          // Use the queue system properly with proper logging
+          console.log('Starting playback through queue system...');
+          musicQueue.play(message.guild.id, song, player, resource, connection, message.channel);
+          
+          // Delete the status message since now playing message will appear
+          setTimeout(() => {
+            statusMsg.delete().catch(() => {});
+          }, 5000);
+          
+        } catch (playerError) {
+          console.error('Player creation error:', playerError);
+          await statusMsg.edit(`❌ **Failed to play audio:** ${playerError.message}\n\n**Try:** \`!dp ${url}\` for direct playback test`);
+        }
+        
       } else {
-        message.channel.send(`🎵 Found: **${songTitle}**`);
-        message.channel.send('🔗 Connecting to voice channel...');
-
-        // Create connection
-        const connection = joinVoiceChannel({
-          channelId: voiceChannel.id,
-          guildId: message.guild.id,
-          adapterCreator: message.guild.voiceAdapterCreator,
-          selfDeaf: false,
-          selfMute: false,
-        });
-
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        // Start playing
-        await musicQueue.play(message.guild.id, connection, message.channel);
+        // Add to queue
+        musicQueue.addToQueue(message.guild.id, song);
+        const position = queueData.queue.length;
+        
+        await statusMsg.edit(`✅ **Added to queue (Position ${position}):** ${song.title}\n👤 **Requested by:** ${song.requestedBy}`);
+        
+        // Auto-delete queue confirmation
+        setTimeout(() => {
+          statusMsg.delete().catch(() => {});
+        }, 8000);
       }
 
     } catch (error) {
       console.error('Play command error:', error);
-      message.channel.send(`❌ Command failed: ${error.message}`);
+      message.channel.send(`❌ **Error:** ${error.message}`);
     }
   },
 };

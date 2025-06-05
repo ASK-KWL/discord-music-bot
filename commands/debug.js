@@ -46,4 +46,36 @@ module.exports = {
     
     message.channel.send(statusInfo);
   },
+
+  name: 'debug',
+  async execute(message, args) {
+    try {
+      const musicQueue = require('../music/queue');
+      const queueData = musicQueue.getQueueList(message.guild.id);
+      
+      let debugInfo = '🔍 **Debug Information:**\n\n';
+      
+      debugInfo += `**Voice Channel:** ${message.member.voice.channel ? `✅ ${message.member.voice.channel.name}` : '❌ Not in voice channel'}\n`;
+      debugInfo += `**Current Song:** ${queueData.current ? `✅ ${queueData.current.title}` : '❌ Nothing playing'}\n`;
+      debugInfo += `**Player Status:** ${queueData.player ? `✅ Connected` : '❌ No player'}\n`;
+      debugInfo += `**Connection:** ${queueData.connection ? `✅ Connected` : '❌ No connection'}\n`;
+      debugInfo += `**Is Playing:** ${queueData.isPlaying ? '✅ Yes' : '❌ No'}\n`;
+      debugInfo += `**Queue Length:** ${queueData.queue.length}\n`;
+      debugInfo += `**Volume:** ${Math.round(queueData.volume * 100)}%\n`;
+      
+      if (queueData.player) {
+        debugInfo += `**Player State:** ${queueData.player._state.status}\n`;
+      }
+      
+      if (queueData.connection) {
+        debugInfo += `**Connection State:** ${queueData.connection.state.status}\n`;
+      }
+
+      message.channel.send(debugInfo);
+
+    } catch (error) {
+      console.error('Debug error:', error);
+      message.channel.send(`❌ **Debug error:** ${error.message}`);
+    }
+  },
 };

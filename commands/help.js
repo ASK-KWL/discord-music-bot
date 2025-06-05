@@ -1,188 +1,117 @@
+const { EmbedBuilder } = require('discord.js');
+
 module.exports = {
   name: 'help',
-  execute(message, args) {
-    const prefix = process.env.PREFIX || '!';
-    
-    // If no specific command requested, show all commands
-    if (!args[0]) {
-      const helpEmbed = {
-        color: 0x0099ff,
-        title: '🎵 Music Bot Commands',
-        description: `Use \`${prefix}help <command>\` for detailed information about a specific command.`,
-        fields: [
+  aliases: ['h', 'commands'],
+  description: 'Show all available commands',
+  async execute(message, args) {
+    try {
+      const embed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('🎵 Music Bot Commands')
+        .setDescription('Here are all the available commands:')
+        .addFields(
           {
-            name: '🎶 Music Commands',
-            value: `\`${prefix}play <song/url>\` - Play a song or playlist\n` +
-                   `\`${prefix}pause\` - Pause the current song\n` +
-                   `\`${prefix}resume\` - Resume playback\n` +
-                   `\`${prefix}skip\` - Skip to next song\n` +
-                   `\`${prefix}stop\` - Stop music and clear queue\n` +
-                   `\`${prefix}leave\` - Disconnect from voice channel`,
-            inline: false
-          },
-          {
-            name: '📋 Queue Commands',
-            value: `\`${prefix}queue\` - Show current queue\n` +
-                   `\`${prefix}clear\` - Clear the queue\n` +
-                   `\`${prefix}remove <number>\` - Remove song from queue\n` +
-                   `\`${prefix}shuffle\` - Shuffle the queue`,
-            inline: false
-          },
-          {
-            name: '🔁 Loop Commands',
-            value: `\`${prefix}loop\` - Show loop status\n` +
-                   `\`${prefix}loop off\` - Disable looping\n` +
-                   `\`${prefix}loop song\` - Loop current song\n` +
-                   `\`${prefix}loop queue\` - Loop entire queue`,
+            name: '🎵 Music Commands',
+            value: [
+              '`!play <song/url>` - Play a song from YouTube',
+              '`!skip` - Skip the current song',
+              '`!queue` - Show the current queue',
+              '`!stop` - Stop music and clear queue',
+              '`!leave` - Leave the voice channel',
+              '`!volume <1-100>` - Set volume (if available)'
+            ].join('\n'),
             inline: false
           },
           {
             name: '🔧 Utility Commands',
-            value: `\`${prefix}nowplaying\` - Show current song info\n` +
-                   `\`${prefix}volume <1-100>\` - Set volume\n` +
-                   `\`${prefix}cleanup\` - Clean temporary files\n` +
-                   `\`${prefix}help\` - Show this help message`,
-            inline: false
-          }
-        ],
-        footer: {
-          text: `Bot created with ❤️ | Prefix: ${prefix}`
-        },
-        timestamp: new Date()
-      };
-
-      return message.channel.send({ embeds: [helpEmbed] });
-    }
-
-    // Detailed help for specific commands
-    const command = args[0].toLowerCase();
-    const commandHelp = getCommandHelp(command, prefix);
-    
-    if (commandHelp) {
-      const detailEmbed = {
-        color: 0x0099ff,
-        title: `📖 Help: ${prefix}${command}`,
-        description: commandHelp.description,
-        fields: [
-          {
-            name: '📝 Usage',
-            value: commandHelp.usage,
+            value: [
+              '`!cleanup [number]` - Clean bot messages (default: 50)',
+              '`!cleanup --all [number]` - Clean bot & command messages',
+              '`!cleanup @user [number]` - Clean specific user\'s messages',
+              '`!test` - Test YouTube audio functionality',
+              '`!voicetest` - Test basic voice functionality'
+            ].join('\n'),
             inline: false
           },
           {
-            name: '💡 Examples',
-            value: commandHelp.examples,
+            name: '📋 Command Aliases',
+            value: [
+              '`!p` → play, `!s` → skip, `!q` → queue',
+              '`!dc` → leave, `!clean` → cleanup',
+              '`!h` → help, `!commands` → help'
+            ].join('\n'),
+            inline: false
+          },
+          {
+            name: '🎛️ Interactive Controls',
+            value: 'Use the buttons that appear with now playing messages for quick control!',
+            inline: false
+          },
+          {
+            name: '💡 Cleanup Examples',
+            value: [
+              '`!cleanup` - Delete 50 bot messages',
+              '`!cleanup 25` - Delete 25 bot messages',
+              '`!cleanup --all` - Delete bot and command messages',
+              '`!cleanup @user 10` - Delete 10 messages from user'
+            ].join('\n'),
             inline: false
           }
-        ],
-        footer: {
-          text: `Use ${prefix}help for all commands`
-        }
-      };
+        )
+        .setFooter({ 
+          text: 'Bot made with ❤️ | Messages auto-delete to keep chat clean',
+          iconURL: message.client.user.displayAvatarURL()
+        })
+        .setTimestamp();
 
-      if (commandHelp.aliases) {
-        detailEmbed.fields.push({
-          name: '🔗 Aliases',
-          value: commandHelp.aliases,
-          inline: false
-        });
+      // If specific command requested
+      if (args.length > 0) {
+        const commandName = args[0].toLowerCase();
+        const command = message.client.commands.get(commandName);
+        
+        if (command) {
+          const commandEmbed = new EmbedBuilder()
+            .setColor('#0099ff')
+            .setTitle(`📖 Command: ${command.name}`)
+            .setDescription(command.description || 'No description available')
+            .setTimestamp();
+
+          if (command.aliases && command.aliases.length > 0) {
+            commandEmbed.addFields({
+              name: 'Aliases:',
+              value: command.aliases.map(alias => `\`!${alias}\``).join(', '),
+              inline: true
+            });
+          }
+
+          const helpMessage = await message.channel.send({ embeds: [commandEmbed] });
+          
+          // Auto-delete after 30 seconds
+          setTimeout(() => {
+            if (helpMessage && !helpMessage.deleted) {
+              helpMessage.delete().catch(() => {});
+            }
+          }, 30000);
+          
+          return;
+        } else {
+          return message.channel.send(`❌ Command \`${commandName}\` not found!`);
+        }
       }
 
-      message.channel.send({ embeds: [detailEmbed] });
-    } else {
-      message.channel.send(`❌ Command \`${command}\` not found! Use \`${prefix}help\` to see all available commands.`);
+      const helpMessage = await message.channel.send({ embeds: [embed] });
+      
+      // Auto-delete help message after 45 seconds to give time to read
+      setTimeout(() => {
+        if (helpMessage && !helpMessage.deleted) {
+          helpMessage.delete().catch(() => {});
+        }
+      }, 45000);
+
+    } catch (error) {
+      console.error('Help command error:', error);
+      message.channel.send('❌ Error displaying help information!');
     }
   },
 };
-
-function getCommandHelp(command, prefix) {
-  const commandInfo = {
-    'play': {
-      description: 'Play a song or add it to the queue. Supports YouTube URLs, search terms, and playlists.',
-      usage: `${prefix}play <song name or YouTube URL>`,
-      examples: `${prefix}play Never Gonna Give You Up\n${prefix}play https://www.youtube.com/watch?v=dQw4w9WgXcQ\n${prefix}play https://www.youtube.com/playlist?list=PLSaOVYWKGD3FqzOK0y-AiGtAP9THiZLRa`,
-      aliases: 'p'
-    },
-    'pause': {
-      description: 'Pause the currently playing song.',
-      usage: `${prefix}pause`,
-      examples: `${prefix}pause`
-    },
-    'resume': {
-      description: 'Resume the paused song.',
-      usage: `${prefix}resume`,
-      examples: `${prefix}resume`,
-      aliases: 'unpause'
-    },
-    'skip': {
-      description: 'Skip the current song and play the next one in queue.',
-      usage: `${prefix}skip`,
-      examples: `${prefix}skip`,
-      aliases: 's, next'
-    },
-    'stop': {
-      description: 'Stop the music and clear the entire queue.',
-      usage: `${prefix}stop`,
-      examples: `${prefix}stop`
-    },
-    'queue': {
-      description: 'Display the current music queue with loop status.',
-      usage: `${prefix}queue`,
-      examples: `${prefix}queue`,
-      aliases: 'q'
-    },
-    'clear': {
-      description: 'Clear all songs from the queue except the currently playing one.',
-      usage: `${prefix}clear`,
-      examples: `${prefix}clear`
-    },
-    'remove': {
-      description: 'Remove a specific song from the queue by its position number.',
-      usage: `${prefix}remove <position>`,
-      examples: `${prefix}remove 3\n${prefix}remove 1`,
-      aliases: 'rm, delete'
-    },
-    'shuffle': {
-      description: 'Randomly shuffle all songs in the queue.',
-      usage: `${prefix}shuffle`,
-      examples: `${prefix}shuffle`
-    },
-    'loop': {
-      description: 'Control loop settings for the current song or entire queue.',
-      usage: `${prefix}loop [off|song|queue]`,
-      examples: `${prefix}loop\n${prefix}loop song\n${prefix}loop queue\n${prefix}loop off`,
-      aliases: 'repeat'
-    },
-    'nowplaying': {
-      description: 'Show information about the currently playing song.',
-      usage: `${prefix}nowplaying`,
-      examples: `${prefix}nowplaying`,
-      aliases: 'np, current'
-    },
-    'volume': {
-      description: 'Set the playback volume (1-100). Default is 80.',
-      usage: `${prefix}volume <1-100>`,
-      examples: `${prefix}volume 50\n${prefix}volume 100`,
-      aliases: 'vol'
-    },
-    'leave': {
-      description: 'Disconnect the bot from the voice channel and clean up temporary files.',
-      usage: `${prefix}leave`,
-      examples: `${prefix}leave`,
-      aliases: 'disconnect, dc'
-    },
-    'cleanup': {
-      description: 'Manually clean up temporary audio files.',
-      usage: `${prefix}cleanup`,
-      examples: `${prefix}cleanup`
-    },
-    'help': {
-      description: 'Show this help message or get detailed help for a specific command.',
-      usage: `${prefix}help [command]`,
-      examples: `${prefix}help\n${prefix}help play\n${prefix}help loop`,
-      aliases: 'h, commands'
-    }
-  };
-
-  return commandInfo[command] || null;
-}

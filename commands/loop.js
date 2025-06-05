@@ -2,48 +2,55 @@ const queue = require('../music/queue');
 
 module.exports = {
   name: 'loop',
-  execute(message, args) {
-    const serverQueue = queue.get(message.guild.id);
-    if (!serverQueue) {
-      return message.reply('❌ There is no music playing!');
-    }
+  aliases: ['repeat'],
+  async execute(message, args) {
+    try {
+      const musicQueue = require('../music/queue');
+      const queueData = musicQueue.getQueueList(message.guild.id);
 
-    if (!args[0]) {
-      // Show current loop status
-      let status = 'Off';
-      if (serverQueue.loop === 'song') status = 'Current Song';
-      if (serverQueue.loop === 'queue') status = 'Queue';
+      if (!queueData.current) {
+        return message.channel.send('❌ Nothing is currently playing!');
+      }
+
+      // Check if user wants to set specific mode
+      const mode = args[0]?.toLowerCase();
+      let newMode;
       
-      return message.channel.send(`🔁 Current loop status: **${status}**\n\nUsage:\n\`!loop off\` - Disable loop\n\`!loop song\` - Loop current song\n\`!loop queue\` - Loop entire queue`);
-    }
+      if (mode === 'song' || mode === 's' || mode === '1') {
+        newMode = musicQueue.setLoopMode(message.guild.id, 'song');
+      } else if (mode === 'queue' || mode === 'q' || mode === '2') {
+        newMode = musicQueue.setLoopMode(message.guild.id, 'queue');
+      } else if (mode === 'off' || mode === '0') {
+        newMode = musicQueue.setLoopMode(message.guild.id, 'off');
+      } else {
+        // No specific mode provided, toggle through modes
+        newMode = musicQueue.toggleLoop(message.guild.id);
+      }
 
-    const mode = args[0].toLowerCase();
+      let statusText;
+      switch (newMode) {
+        case 'song':
+          statusText = `🔂 **Loop: Song**\n\n**${queueData.current.title}** will repeat when it ends.`;
+          break;
+        case 'queue':
+          statusText = `🔁 **Loop: Queue**\n\nThe entire queue (${queueData.queue.length + 1} songs) will repeat.`;
+          break;
+        default:
+          statusText = `🔄 **Loop: Off**\n\nQueue will continue normally.`;
+      }
+      
+      const statusMsg = await message.channel.send(
+        `${statusText}\n\n**Usage:**\n• \`!loop\` - Toggle modes\n• \`!loop song\` - Repeat current song\n• \`!loop queue\` - Repeat entire queue\n• \`!loop off\` - Disable loop`
+      );
 
-    switch (mode) {
-      case 'off':
-      case 'disable':
-      case 'stop':
-        serverQueue.loop = false;
-        message.channel.send('🔁 Loop disabled');
-        break;
+      // Auto-delete after 8 seconds
+      setTimeout(() => {
+        statusMsg.delete().catch(() => {});
+      }, 8000);
 
-      case 'song':
-      case 'track':
-      case 'current':
-        serverQueue.loop = 'song';
-        message.channel.send('🔂 Now looping current song');
-        break;
-
-      case 'queue':
-      case 'all':
-      case 'playlist':
-        serverQueue.loop = 'queue';
-        message.channel.send('🔁 Now looping entire queue');
-        break;
-
-      default:
-        message.channel.send('❌ Invalid loop mode!\n\nUsage:\n\`!loop off\` - Disable loop\n\`!loop song\` - Loop current song\n\`!loop queue\` - Loop entire queue');
-        break;
+    } catch (error) {
+      console.error('Loop command error:', error);
+      message.channel.send(`❌ **Error:** ${error.message}`);
     }
   },
 };

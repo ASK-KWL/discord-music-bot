@@ -1,37 +1,60 @@
-const musicQueue = require('../music/queue');
+const { EmbedBuilder } = require('discord.js');
 
 module.exports = {
   name: 'queue',
   async execute(message, args) {
     try {
+      const musicQueue = require('../music/queue');
       const queue = musicQueue.getQueueList(message.guild.id);
       
       if (!queue.current && queue.queue.length === 0) {
-        return message.channel.send('❌ The queue is empty!');
+        const emptyEmbed = new EmbedBuilder()
+          .setColor('#ffff00')
+          .setTitle('📭 Empty Queue')
+          .setDescription('The queue is empty! Use `!play <song>` to add some music.')
+          .setTimestamp();
+        return message.channel.send({ embeds: [emptyEmbed] });
       }
 
-      let queueText = '';
-      
+      const embed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle('📋 Music Queue')
+        .setTimestamp();
+
       if (queue.current) {
-        queueText += `🎵 **Now Playing:**\n${queue.current.title}\n\n`;
+        embed.addFields({
+          name: '🎵 Now Playing',
+          value: `**${queue.current.title}**\nRequested by: ${queue.current.requestedBy}\nDuration: ${musicQueue.formatDuration(queue.current.duration)}`,
+          inline: false
+        });
       }
       
       if (queue.queue.length > 0) {
-        queueText += `📋 **Queue:**\n`;
-        queue.queue.slice(0, 10).forEach((song, index) => {
-          queueText += `${index + 1}. ${song.title}\n`;
+        const queueList = queue.queue.slice(0, 10).map((song, index) => 
+          `${index + 1}. **${song.title}** (${musicQueue.formatDuration(song.duration)})\n   Requested by: ${song.requestedBy}`
+        ).join('\n\n');
+        
+        embed.addFields({
+          name: `📜 Up Next (${queue.queue.length} songs)`,
+          value: queueList,
+          inline: false
         });
         
         if (queue.queue.length > 10) {
-          queueText += `\n... and ${queue.queue.length - 10} more songs`;
+          embed.setFooter({ text: `... and ${queue.queue.length - 10} more songs` });
         }
       }
 
-      message.channel.send(queueText);
+      message.channel.send({ embeds: [embed] });
 
     } catch (error) {
       console.error('Queue command error:', error);
-      message.channel.send('❌ Error displaying queue!');
+      const errorEmbed = new EmbedBuilder()
+        .setColor('#ff0000')
+        .setTitle('❌ Error')
+        .setDescription('Error displaying queue!')
+        .setTimestamp();
+      message.channel.send({ embeds: [errorEmbed] });
     }
   },
 };
