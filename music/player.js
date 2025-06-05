@@ -1,8 +1,5 @@
 const { createAudioPlayer, createAudioResource, joinVoiceChannel, StreamType } = require('@discordjs/voice');
 const ytdl = require('@distube/ytdl-core');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
 
 function createAudioConnection(message) {
   const voiceChannel = message.member.voice.channel;
@@ -13,42 +10,34 @@ function createAudioConnection(message) {
     channelId: voiceChannel.id,
     guildId: message.guild.id,
     adapterCreator: message.guild.voiceAdapterCreator,
+    selfDeaf: false,
+    selfMute: false,
   });
 }
 
 async function createPlayer(url) {
-  console.log('Creating audio player with @distube/ytdl-core');
+  console.log('Creating YouTube player with tested method...');
   
   const player = createAudioPlayer({
     behaviors: {
-      noSubscriber: 'play', // Keep playing even if no subscribers
-      maxMissedFrames: Math.round(5000 / 20),
+      noSubscriber: 'play',
     }
   });
 
   try {
-    console.log(`Creating stream for: ${url}`);
-    
-    // Use the more stable ytdl-core fork
+    // Use the same approach that worked for FFmpeg
     const stream = ytdl(url, {
       filter: 'audioonly',
       quality: 'highestaudio',
       highWaterMark: 1 << 25,
       requestOptions: {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': '*/*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'cross-site'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
       }
     });
 
+    // Use the same StreamType that worked for streamtest
     const resource = createAudioResource(stream, {
       inputType: StreamType.Arbitrary,
       inlineVolume: true,
@@ -62,12 +51,16 @@ async function createPlayer(url) {
       resource.volume.setVolume(0.8);
     }
 
-    // Handle stream errors
+    // Add the same error handling that worked
     stream.on('error', (error) => {
-      console.error('❌ Stream error:', error);
+      console.error('YouTube stream error:', error);
     });
 
-    console.log('✅ YouTube audio resource created successfully');
+    resource.playStream.on('error', (error) => {
+      console.error('YouTube playStream error:', error);
+    });
+
+    console.log('✅ YouTube audio resource created with tested method');
     return { player, resource };
     
   } catch (error) {
@@ -76,69 +69,107 @@ async function createPlayer(url) {
   }
 }
 
-async function createPlayerWithFallback(url) {
-  console.log('Creating player with fallback system');
+// Add a new function that processes YouTube audio like our successful tests
+async function createYouTubePlayerWithProcessing(url) {
+  console.log('Creating processed YouTube player...');
   
   const player = createAudioPlayer({
     behaviors: {
-      noSubscriber: 'pause',
-      maxMissedFrames: Math.round(5000 / 20),
+      noSubscriber: 'play',
     }
   });
 
-  // Try multiple approaches
-  const attempts = [
-    // Attempt 1: Basic ytdl
-    async () => {
-      console.log('Attempt 1: Basic ytdl stream');
-      const stream = ytdl(url, { filter: 'audioonly', quality: 'highestaudio' });
-      return createAudioResource(stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
-    },
-    
-    // Attempt 2: Lower quality
-    async () => {
-      console.log('Attempt 2: Lower quality stream');
-      const stream = ytdl(url, { filter: 'audioonly', quality: 'lowestaudio' });
-      return createAudioResource(stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
-    },
-    
-    // Attempt 3: Different format
-    async () => {
-      console.log('Attempt 3: Different format');
-      const stream = ytdl(url, { filter: 'audio', format: 'mp4' });
-      return createAudioResource(stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
-    }
-  ];
+  try {
+    // Get raw YouTube stream with better error handling
+    const ytStream = ytdl(url, {
+      filter: 'audioonly',
+      quality: 'highestaudio',
+      highWaterMark: 1 << 25,
+      requestOptions: {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      }
+    });
 
-  for (let i = 0; i < attempts.length; i++) {
-    try {
-      const resource = await attempts[i]();
-      if (resource.volume) {
-        resource.volume.setVolume(0.8);
+    // Process the stream similar to how streamtest worked
+    const { spawn } = require('child_process');
+
+    // Use FFmpeg to process YouTube audio to the same format that worked
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', 'pipe:0',        // Input from pipe
+      '-ac', '2',            // Stereo (like our working tests)
+      '-ar', '48000',        // 48kHz (Discord preferred)
+      '-f', 's16le',         // Same format as working tests
+      '-reconnect', '1',     // Enable reconnection
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '5',
+      '-'                    // Output to pipe
+    ]);
+
+    // Better error handling for streams
+    ytStream.on('error', (error) => {
+      console.error('YouTube stream error:', error);
+      ffmpeg.stdin.destroy();
+    });
+
+    ffmpeg.stdin.on('error', (error) => {
+      if (error.code !== 'EPIPE') {
+        console.error('FFmpeg stdin error:', error);
       }
-      console.log(`✅ Attempt ${i + 1} successful`);
-      return { player, resource };
-    } catch (error) {
-      console.error(`❌ Attempt ${i + 1} failed:`, error.message);
-      if (i === attempts.length - 1) {
-        throw new Error(`All ${attempts.length} attempts failed. Last error: ${error.message}`);
+    });
+
+    ffmpeg.stderr.on('data', (data) => {
+      console.log('FFmpeg stderr:', data.toString());
+    });
+
+    // Pipe YouTube stream through FFmpeg
+    ytStream.pipe(ffmpeg.stdin);
+
+    const resource = createAudioResource(ffmpeg.stdout, {
+      inputType: StreamType.Raw,
+      inlineVolume: true,
+      metadata: {
+        title: 'Processed YouTube Audio',
+        url: url
       }
-    }
+    });
+
+    // Handle errors
+    ffmpeg.on('error', (error) => {
+      console.error('FFmpeg processing error:', error);
+    });
+
+    console.log('✅ Processed YouTube audio resource created');
+    return { player, resource };
+    
+  } catch (error) {
+    console.error('❌ Error creating processed YouTube player:', error);
+    throw error;
   }
+}
+
+async function createSimplePlayer(audioUrl) {
+  const player = createAudioPlayer({
+    behaviors: {
+      noSubscriber: 'play',
+    }
+  });
+
+  const resource = createAudioResource(audioUrl, {
+    inlineVolume: true
+  });
+
+  if (resource.volume) {
+    resource.volume.setVolume(1.0);
+  }
+
+  return { player, resource };
 }
 
 async function getSongInfo(url) {
   try {
-    console.log(`Getting info for: ${url}`);
-    
-    const info = await ytdl.getInfo(url, {
-      requestOptions: {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        }
-      }
-    });
-    
+    const info = await ytdl.getInfo(url);
     return {
       title: info.videoDetails.title || 'Unknown Title',
       duration: parseInt(info.videoDetails.lengthSeconds) || 0,
@@ -163,7 +194,8 @@ function isPlaylist(url) {
 module.exports = { 
   createAudioConnection, 
   createPlayer,
-  createPlayerWithFallback,
+  createYouTubePlayerWithProcessing,
+  createSimplePlayer,
   getSongInfo,
   isPlaylist
 };

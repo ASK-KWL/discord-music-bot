@@ -9,80 +9,68 @@ module.exports = {
         return message.channel.send('❌ Join a voice channel first!');
       }
 
-      message.channel.send('🔧 Starting voice connection test...');
+      message.channel.send('🔧 Starting simple voice test...');
 
-      // Step 1: Create connection
-      console.log('Creating voice connection...');
+      // Step 1: Create basic connection
       const connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: message.guild.id,
         adapterCreator: message.guild.voiceAdapterCreator,
+        selfDeaf: false,
+        selfMute: false,
       });
 
-      message.channel.send('✅ Voice connection created');
+      // Step 2: Wait a moment for connection
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
-      // Step 2: Check connection state
-      connection.on('stateChange', (oldState, newState) => {
-        console.log(`Connection: ${oldState.status} -> ${newState.status}`);
-        message.channel.send(`🔗 Connection: ${oldState.status} -> ${newState.status}`);
-      });
-
-      // Step 3: Create simple audio player
-      console.log('Creating audio player...');
-      const player = createAudioPlayer();
-
-      // Step 4: Create a simple test tone (no external dependencies)
-      const testAudio = 'https://www.soundjay.com/misc/sounds/bell-ringing-05.wav'; // Simple test audio
-      
-      try {
-        const resource = createAudioResource(testAudio, {
-          inlineVolume: true
-        });
-
-        if (resource.volume) {
-          resource.volume.setVolume(1.0); // Max volume for testing
+      // Step 3: Create player and resource
+      const player = createAudioPlayer({
+        behaviors: {
+          noSubscriber: 'play',
         }
+      });
 
-        message.channel.send('✅ Audio resource created');
+      const resource = createAudioResource('https://www2.cs.uic.edu/~i101/SoundFiles/BabyElephantWalk60.wav', {
+        inlineVolume: true
+      });
 
-        // Step 5: Subscribe and play
-        console.log('Subscribing player to connection...');
-        connection.subscribe(player);
-        message.channel.send('✅ Player subscribed to connection');
-
-        // Step 6: Add player event listeners
-        player.on('stateChange', (oldState, newState) => {
-          console.log(`Player: ${oldState.status} -> ${newState.status}`);
-          message.channel.send(`🎵 Player: ${oldState.status} -> ${newState.status}`);
-          
-          if (newState.status === AudioPlayerStatus.Playing) {
-            message.channel.send('🔊 **AUDIO SHOULD BE PLAYING NOW!**');
-          }
-          
-          if (newState.status === AudioPlayerStatus.Idle && oldState.status === AudioPlayerStatus.Playing) {
-            message.channel.send('✅ Audio finished playing');
-            connection.destroy();
-          }
-        });
-
-        player.on('error', error => {
-          console.error('Player error:', error);
-          message.channel.send(`❌ Player error: ${error.message}`);
-        });
-
-        // Step 7: Start playing
-        console.log('Starting playback...');
-        player.play(resource);
-        message.channel.send('🎵 Playback started - listen for audio!');
-
-      } catch (resourceError) {
-        console.error('Resource creation error:', resourceError);
-        message.channel.send(`❌ Resource error: ${resourceError.message}`);
+      if (resource.volume) {
+        resource.volume.setVolume(1.0);
       }
+
+      // Step 4: Single event listener
+      let finished = false;
+      player.on('stateChange', (oldState, newState) => {
+        console.log(`Player: ${oldState.status} -> ${newState.status}`);
+        
+        if (newState.status === AudioPlayerStatus.Playing && !finished) {
+          message.channel.send('🔊 **AUDIO IS PLAYING!**');
+        }
+        
+        if (newState.status === AudioPlayerStatus.Idle && oldState.status === AudioPlayerStatus.Playing && !finished) {
+          finished = true;
+          message.channel.send('✅ Audio finished');
+          setTimeout(() => {
+            if (connection.state.status !== 'destroyed') {
+              connection.destroy();
+            }
+          }, 500);
+        }
+      });
+
+      player.on('error', (error) => {
+        console.error('Player error:', error);
+        message.channel.send(`❌ Player error: ${error.message}`);
+      });
+
+      // Step 5: Subscribe and play
+      connection.subscribe(player);
+      player.play(resource);
+      message.channel.send('🎵 Playing test audio...');
 
     } catch (error) {
       console.error('Voice test error:', error);
-      message.channel.send(`❌ Voice test failed: ${error.message}`);
+      message.channel.send(`❌ Test failed: ${error.message}`);
     }
   },
 };

@@ -1,4 +1,4 @@
-const queue = require('../music/queue');
+const musicQueue = require('../music/queue');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -8,28 +8,37 @@ const TEMP_DIR = path.join(os.tmpdir(), 'discord-music-bot');
 
 module.exports = {
   name: 'leave',
-  execute(message) {
-    const serverQueue = queue.get(message.guild.id);
-    if (!serverQueue) return message.reply('❌ I\'m not in a voice channel.');
+  aliases: ['disconnect', 'dc'],
+  async execute(message, args) {
+    try {
+      const voiceChannel = message.member.voice.channel;
+      if (!voiceChannel) {
+        return message.channel.send('❌ You need to be in a voice channel!');
+      }
 
-    // Stop the player and destroy connection first
-    if (serverQueue.player) {
-      serverQueue.player.stop(true); // Force stop
+      const queue = musicQueue.getQueueList(message.guild.id);
+      
+      if (!queue.current && queue.queue.length === 0) {
+        return message.channel.send('❌ I\'m not connected to any voice channel!');
+      }
+
+      let leaveMessage = '👋 **Disconnected from voice channel!**';
+      
+      if (queue.current) {
+        leaveMessage += `\n⏹️ Stopped: **${queue.current.title}**`;
+      }
+      
+      if (queue.queue.length > 0) {
+        leaveMessage += `\n📭 Cleared ${queue.queue.length} song${queue.queue.length > 1 ? 's' : ''} from queue`;
+      }
+
+      musicQueue.stop(message.guild.id);
+      message.channel.send(leaveMessage);
+
+    } catch (error) {
+      console.error('Leave command error:', error);
+      message.channel.send('❌ Error leaving voice channel!');
     }
-    
-    if (serverQueue.connection) {
-      serverQueue.connection.destroy();
-    }
-    
-    // Remove from queue
-    queue.delete(message.guild.id);
-
-    // Wait longer for resources to be fully released
-    setTimeout(() => {
-      cleanupTempFiles();
-    }, 5000); // Wait 5 seconds
-
-    message.channel.send('👋 Disconnected from the voice channel. Cleaning up files...');
   },
 };
 
