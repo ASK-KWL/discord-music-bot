@@ -99,7 +99,8 @@ client.on('messageCreate', async message => {
     const autoDeleteCommands = [
       'skip', 'queue', 'help', 'test', 'voicetest', 'basictest', 'ffmpegtest', 'ytdltest', 'debugdelete',
       'simpletest', 'quickplay', 'quicktest', 'directplay', 'debug', 'volume', 'loop', 'shuffle', 'testdelete',
-      's', 'q', 'h', 'commands', 't', 'vt', 'bt', 'ft', 'st', 'qt', 'qp', 'qtest', 'dp', 'db', 'vol', 'l', 'sh', 'dd', 'td'  // Include aliases
+      'fixsound', 'volumetest', 'audiofix',
+      's', 'q', 'h', 'commands', 't', 'vt', 'bt', 'ft', 'st', 'qt', 'qp', 'qtest', 'dp', 'db', 'vol', 'l', 'sh', 'dd', 'td', 'fs', 'vtest'
     ];
     
     // Special handling for cleanup commands - don't auto-delete, let the command handle it

@@ -39,17 +39,16 @@ async function createYouTubePlayerWithProcessing(url) {
   try {
     const { spawn } = require('child_process');
     
-    // Try different yt-dlp commands
+    // Find working yt-dlp command
     const ytdlpCommands = [
       'yt-dlp',
-      'yt-dlp.exe',
+      'yt-dlp.exe', 
       'python -m yt_dlp',
       'python3 -m yt_dlp'
     ];
     
     let ytdlpCmd = null;
     
-    // Test which yt-dlp command works
     for (const cmd of ytdlpCommands) {
       try {
         console.log(`Testing command: ${cmd}`);
@@ -86,15 +85,16 @@ async function createYouTubePlayerWithProcessing(url) {
     
     console.log(`Using yt-dlp command: ${ytdlpCmd}`);
     
-    // Use the working yt-dlp command with correct flags
+    // Create the processes with compatible options
     const cmdParts = ytdlpCmd.split(' ');
     const ytdlp = spawn(cmdParts[0], [
       ...cmdParts.slice(1),
-      '--format', 'bestaudio[ext=webm]/bestaudio/best',
+      '--format', 'bestaudio/best',
       '--output', '-',
       '--quiet',
       '--no-warnings',
       '--no-check-certificates',
+      '--no-playlist',
       url
     ], { shell: true });
 
@@ -102,15 +102,68 @@ async function createYouTubePlayerWithProcessing(url) {
       '-i', 'pipe:0',
       '-ac', '2',
       '-ar', '48000',
-      '-f', 's16le',
+      '-acodec', 'pcm_s16le',
+      '-f', 'wav',
+      '-bufsize', '64k',
       '-loglevel', 'error',
-      '-'
+      'pipe:1'
     ]);
+
+    // Handle process cleanup properly
+    let processesCleaned = false;
+    const cleanupProcesses = () => {
+      if (processesCleaned) return;
+      processesCleaned = true;
+      
+      console.log('Cleaning up yt-dlp and FFmpeg processes...');
+      
+      try {
+        if (!ytdlp.killed) {
+          ytdlp.kill('SIGTERM');
+          setTimeout(() => {
+            if (!ytdlp.killed) ytdlp.kill('SIGKILL');
+          }, 1000);
+        }
+      } catch (error) {
+        console.log('Error killing yt-dlp:', error.message);
+      }
+      
+      try {
+        if (!ffmpeg.killed) {
+          ffmpeg.stdin.end();
+          ffmpeg.kill('SIGTERM');
+          setTimeout(() => {
+            if (!ffmpeg.killed) ffmpeg.kill('SIGKILL');
+          }, 1000);
+        }
+      } catch (error) {
+        console.log('Error killing FFmpeg:', error.message);
+      }
+    };
 
     let outputStarted = false;
     let outputBytes = 0;
 
-    ytdlp.stdout.pipe(ffmpeg.stdin);
+    // Pipe with error handling
+    ytdlp.stdout.on('data', (chunk) => {
+      if (!ffmpeg.stdin.destroyed) {
+        try {
+          ffmpeg.stdin.write(chunk);
+        } catch (writeError) {
+          console.log('Error writing to FFmpeg:', writeError.message);
+        }
+      }
+    });
+
+    ytdlp.stdout.on('end', () => {
+      if (!ffmpeg.stdin.destroyed) {
+        try {
+          ffmpeg.stdin.end();
+        } catch (endError) {
+          console.log('Error ending FFmpeg input:', endError.message);
+        }
+      }
+    });
 
     ytdlp.stderr.on('data', (data) => {
       const message = data.toString();
@@ -122,7 +175,7 @@ async function createYouTubePlayerWithProcessing(url) {
     ffmpeg.stdout.on('data', (chunk) => {
       if (!outputStarted) {
         outputStarted = true;
-        console.log('FFmpeg output started, chunk size:', chunk.length);
+        console.log('FFmpeg WAV output started, chunk size:', chunk.length);
       }
       outputBytes += chunk.length;
     });
@@ -134,44 +187,76 @@ async function createYouTubePlayerWithProcessing(url) {
       }
     });
 
+    ffmpeg.on('close', (code) => {
+      console.log(`FFmpeg closed with code ${code}, total output: ${outputBytes} bytes`);
+      cleanupProcesses();
+    });
+
+    ytdlp.on('close', (code) => {
+      console.log(`yt-dlp closed with code ${code}`);
+      if (code !== 0) {
+        cleanupProcesses();
+      }
+    });
+
+    // Create resource from FFmpeg WAV output
     const resource = createAudioResource(ffmpeg.stdout, {
-      inputType: StreamType.Raw,
+      inputType: StreamType.Arbitrary,
       inlineVolume: true,
       metadata: {
-        title: 'YouTube Audio (yt-dlp)',
+        title: 'YouTube Audio (yt-dlp + FFmpeg WAV)',
         url: url
       }
     });
 
     if (resource.volume) {
-      resource.volume.setVolume(1.0);
+      resource.volume.setVolume(1.0); // Set to 100% to ensure audible
       console.log('yt-dlp processed audio volume set to 100%');
     }
 
-    // Wait for processing to start
+    // Add cleanup listener to the player
+    player.on('stateChange', (oldState, newState) => {
+      if (newState.status === 'idle' && oldState.status === 'playing') {
+        setTimeout(cleanupProcesses, 1000);
+      }
+    });
+
+    // Wait for processing to start with shorter timeout
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('yt-dlp + FFmpeg failed to start processing'));
-      }, 25000); // Increased timeout
+        cleanupProcesses();
+        reject(new Error('yt-dlp + FFmpeg failed to start processing within 15 seconds'));
+      }, 15000);
 
       ffmpeg.stdout.once('data', () => {
         clearTimeout(timeout);
+        console.log('✅ yt-dlp + FFmpeg WAV processing started successfully');
         resolve();
       });
 
       ytdlp.once('error', (error) => {
         clearTimeout(timeout);
+        cleanupProcesses();
         reject(new Error(`yt-dlp error: ${error.message}`));
       });
 
       ffmpeg.once('error', (error) => {
         clearTimeout(timeout);
+        cleanupProcesses();
         reject(new Error(`FFmpeg error: ${error.message}`));
+      });
+      
+      // Also reject if yt-dlp exits with error code
+      ytdlp.once('close', (code) => {
+        if (code !== 0) {
+          clearTimeout(timeout);
+          cleanupProcesses();
+          reject(new Error(`yt-dlp exited with code ${code}`));
+        }
       });
     });
 
-    console.log('✅ yt-dlp + FFmpeg processing started');
-    return { player, resource };
+    return { player, resource, cleanup: cleanupProcesses };
     
   } catch (error) {
     console.error('❌ Error creating yt-dlp player:', error);

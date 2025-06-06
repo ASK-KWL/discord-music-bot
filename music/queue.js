@@ -59,6 +59,14 @@ function play(guildId, song, player, resource, connection, channel) {
         // Song finished, play next
         console.log('Song finished, playing next...');
         queue.isPlaying = false;
+        
+        // Clean up current player
+        setTimeout(() => {
+          if (queue.player === player) {
+            queue.player = null;
+          }
+        }, 1000);
+        
         playNext(guildId);
       }
     }
@@ -70,14 +78,28 @@ function play(guildId, song, player, resource, connection, channel) {
     if (channel) {
       channel.send(`❌ **Playback error:** ${error.message}`);
     }
-    playNext(guildId);
+    
+    // Clean up and try next
+    setTimeout(() => {
+      if (queue.player === player) {
+        queue.player = null;
+      }
+      playNext(guildId);
+    }, 1000);
   });
 
   // Subscribe and start playing
-  connection.subscribe(player);
-  player.play(resource);
-
-  console.log(`✅ Queue started playing: ${song.title}`);
+  try {
+    connection.subscribe(player);
+    player.play(resource);
+    console.log(`✅ Queue started playing: ${song.title}`);
+  } catch (playError) {
+    console.error('Error starting playback:', playError);
+    queue.isPlaying = false;
+    if (channel) {
+      channel.send(`❌ **Failed to start playback:** ${playError.message}`);
+    }
+  }
 }
 
 function toggleLoop(guildId) {
@@ -310,16 +332,31 @@ function playNext(guildId) {
 function stop(guildId) {
   const queue = getQueueList(guildId);
   
+  console.log(`Stopping playback for guild: ${guildId}`);
+  
+  // Clear queue
   queue.queue = [];
   queue.current = null;
   queue.isPlaying = false;
   
+  // Stop player
   if (queue.player) {
-    queue.player.stop();
+    try {
+      queue.player.stop(true); // Force stop
+      queue.player = null;
+    } catch (error) {
+      console.log('Error stopping player:', error.message);
+    }
   }
   
+  // Destroy connection
   if (queue.connection) {
-    queue.connection.destroy();
+    try {
+      queue.connection.destroy();
+      queue.connection = null;
+    } catch (error) {
+      console.log('Error destroying connection:', error.message);
+    }
   }
   
   // Delete the now playing message when stopping
@@ -331,11 +368,11 @@ function stop(guildId) {
       } catch (error) {
         console.log('Could not delete now playing message on stop');
       }
-    }, 3000); // 3 second delay before deletion
+    }, 1000);
   }
   
   clearInactivityTimer(guildId);
-  console.log(`Stopped and cleared queue for guild: ${guildId}`);
+  console.log(`✅ Stopped and cleared queue for guild: ${guildId}`);
 }
 
 function skip(guildId, channel) {
@@ -348,7 +385,16 @@ function skip(guildId, channel) {
   console.log(`Skipping: ${queue.current.title}`);
   
   if (queue.player) {
-    queue.player.stop(); // This will trigger the 'idle' event and play next
+    try {
+      queue.player.stop(true); // Force stop to trigger idle state
+    } catch (error) {
+      console.log('Error stopping player for skip:', error.message);
+      // Force cleanup
+      queue.player = null;
+      playNext(guildId);
+    }
+  } else {
+    playNext(guildId);
   }
   
   return true;
@@ -376,11 +422,21 @@ function resume(guildId) {
 
 function setVolume(guildId, volume) {
   const queue = getQueueList(guildId);
+  
+  if (!queue.current) {
+    return false;
+  }
+  
+  // Store the volume in queue
   queue.volume = volume;
   
-  if (queue.player && queue.player.resource && queue.player.resource.volume) {
-    queue.player.resource.volume.setVolume(volume);
+  // Apply volume to current player resource
+  if (queue.player && queue.player.state && queue.player.state.resource && queue.player.state.resource.volume) {
+    queue.player.state.resource.volume.setVolume(volume);
+    console.log(`Volume set to ${Math.round(volume * 100)}% for guild: ${guildId}`);
   }
+  
+  return true;
 }
 
 function resetInactivityTimer(guildId) {
